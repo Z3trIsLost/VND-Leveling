@@ -1,13 +1,12 @@
-const {
-  Client,
-  GatewayIntentBits,
-  Partials,
-  Collection,
-  Events,
-  REST,
-  Routes,
+const { 
+  Client, 
+  GatewayIntentBits, 
+  Partials, 
+  Events, 
+  REST, 
+  Routes, 
   SlashCommandBuilder,
-  PermissionsBitField
+  EmbedBuilder
 } = require("discord.js");
 
 const fs = require("fs");
@@ -24,10 +23,8 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-client.commands = new Collection();
-
 // =====================
-// DATA PATH (Railway Volume Compatible)
+// DATA PATH
 // =====================
 const DATA_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH
   ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, "data")
@@ -35,38 +32,28 @@ const DATA_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH
 
 const LEVELS_FILE = path.join(DATA_DIR, "levels.json");
 
-// create data folder / file if not exists
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(LEVELS_FILE)) fs.writeFileSync(LEVELS_FILE, JSON.stringify({}, null, 2));
 
-// =====================
-// LOAD / SAVE
-// =====================
 function loadLevels() {
-  try {
-    return JSON.parse(fs.readFileSync(LEVELS_FILE, "utf8"));
-  } catch (err) {
-    console.error("Error reading levels file:", err);
-    return {};
+  try { 
+    return JSON.parse(fs.readFileSync(LEVELS_FILE, "utf8")); 
+  } catch { 
+    return {}; 
   }
 }
 
 function saveLevels(data) {
-  try {
-    fs.writeFileSync(LEVELS_FILE, JSON.stringify(data, null, 2));
-  } catch (err) {
-    console.error("Error saving levels file:", err);
+  try { 
+    fs.writeFileSync(LEVELS_FILE, JSON.stringify(data, null, 2)); 
+  } catch (err) { 
+    console.error(err); 
   }
 }
 
-function getXPNeeded(level) {
-  return (level + 1) * 120; // كل لفل يحتاج +120 XP أكثر من قبل
+function getXPNeeded(level) { 
+  return level * 100; 
 }
-
-// =====================
-// LEVEL UP CHANNEL 
-// =====================
-const LEVEL_CHANNEL_ID = "1408661076350079056"; // غيرها بالشانل تاعك
 
 // =====================
 // ROLE REWARDS
@@ -81,33 +68,47 @@ const roleRewards = {
 };
 
 // =====================
-// COMMANDS
+// LEVEL-UP CHANNEL
+// =====================
+const LEVEL_UP_CHANNEL_ID = '1408661076350079056';
+
+// =====================
+// SLASH COMMANDS
 // =====================
 const commands = [
   new SlashCommandBuilder()
-    .setName("rank")
-    .setDescription("Show your current level and XP"),
-  new SlashCommandBuilder()
-    .setName("leaderboard")
-    .setDescription("Show the top leveling leaderboard"),
-  new SlashCommandBuilder()
     .setName("ping")
-    .setDescription("Check bot latency")
-].map(cmd => cmd.toJSON());
+    .setDescription("Check bot response time"),
 
-client.once(Events.ClientReady, async () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
+  new SlashCommandBuilder()
+    .setName("xp_leaderboard")
+    .setDescription("Show the XP leaderboard")
+].map(command => command.toJSON());
+
+const rest = new REST({ version: "10" }).setToken(config.token);
+
+(async () => {
   try {
-    const rest = new REST({ version: "10" }).setToken(config.token);
-    await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), { body: commands });
-    console.log("✅ Slash commands registered.");
-  } catch (err) {
-    console.error("❌ Error registering slash commands:", err);
+    console.log("🔄 Registering slash commands...");
+    await rest.put(
+      Routes.applicationGuildCommands(config.clientId, config.guildId),
+      { body: commands }
+    );
+    console.log("✅ Slash commands registered successfully.");
+  } catch (error) {
+    console.error("❌ Error registering slash commands:", error);
   }
+})();
+
+// =====================
+// BOT READY
+// =====================
+client.once(Events.ClientReady, () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
 });
 
 // =====================
-// INTERACTIONS
+// INTERACTION HANDLER
 // =====================
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
@@ -117,30 +118,41 @@ client.on(Events.InteractionCreate, async interaction => {
   const userId = interaction.user.id;
 
   if (!levels[guildId]) levels[guildId] = {};
-  if (!levels[guildId][userId]) levels[guildId][userId] = { xp: 0, level: 0, roles: [] };
-
-  if (interaction.commandName === "rank") {
-    const userData = levels[guildId][userId];
-    return interaction.reply({
-      content: `📊 ${interaction.user}, أنت Level **${userData.level}** وعندك **${userData.xp} XP**.`,
-      ephemeral: false
-    });
-  }
-
-  if (interaction.commandName === "leaderboard") {
-    const guildUsers = levels[guildId];
-    const sorted = Object.entries(guildUsers).sort((a, b) => b[1].level - a[1].level || b[1].xp - a[1].xp).slice(0, 10);
-    if (!sorted.length) return interaction.reply("مازال ما كاش داتا في leaderboard.");
-    let text = "🏆 **Leaderboard**\n\n";
-    for (let i = 0; i < sorted.length; i++) {
-      const [id, data] = sorted[i];
-      text += `**${i + 1}.** <@${id}> — Level **${data.level}** (**${data.xp} XP**)\n`;
-    }
-    return interaction.reply(text);
+  if (!levels[guildId][userId]) {
+    levels[guildId][userId] = { xp: 0, level: 1 };
+    saveLevels(levels);
   }
 
   if (interaction.commandName === "ping") {
     return interaction.reply("🏓 Pong!");
+  }
+
+  if (interaction.commandName === "xp_leaderboard") {
+    const guildUsers = Object.entries(levels[guildId]).filter(
+      ([key, value]) => typeof value === "object" && value !== null && "xp" in value && "level" in value
+    );
+
+    const sorted = guildUsers
+      .sort((a, b) => b[1].level - a[1].level || b[1].xp - a[1].xp)
+      .slice(0, 10);
+
+    if (!sorted.length) return interaction.reply("لا توجد بيانات بعد في لوحة المتصدرين.");
+
+    let description = "";
+    for (let i = 0; i < sorted.length; i++) {
+      const [id, data] = sorted[i];
+      const member = await interaction.guild.members.fetch(id).catch(() => null);
+      const username = member ? member.user.username : `Unknown User (${id})`;
+      description += `**${i + 1}.** ${username} — المستوى **${data.level}** | **${data.xp} XP**\n`;
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle("🏆 لوحة متصدري الخبرة")
+      .setDescription(description)
+      .setFooter({ text: `Requested by ${interaction.user.username}` })
+      .setTimestamp();
+
+    return interaction.reply({ embeds: [embed] });
   }
 });
 
@@ -155,14 +167,15 @@ client.on(Events.MessageCreate, async message => {
   const levels = loadLevels();
 
   if (!levels[guildId]) levels[guildId] = {};
-  if (!levels[guildId][userId]) levels[guildId][userId] = { xp: 0, level: 0, roles: [] };
+  if (!levels[guildId][userId]) {
+    levels[guildId][userId] = { xp: 0, level: 1 };
+  }
 
-  // XP gain
-  const xpGain = Math.floor(Math.random() * 16) + 15; // 15-30 XP
+  const oldLevel = levels[guildId][userId].level;
+  const xpGain = Math.floor(Math.random() * 16) + 15;
   levels[guildId][userId].xp += xpGain;
 
   let userData = levels[guildId][userId];
-  let oldLevel = userData.level;
   let leveledUp = false;
 
   while (userData.xp >= getXPNeeded(userData.level)) {
@@ -174,21 +187,25 @@ client.on(Events.MessageCreate, async message => {
   saveLevels(levels);
 
   if (leveledUp) {
-    let targetChannel = message.guild.channels.cache.get(LEVEL_CHANNEL_ID) || message.channel;
+    const channel = message.guild.channels.cache.get(LEVEL_UP_CHANNEL_ID) || message.channel;
 
-    let rewardText = "";
-    const newRole = roleRewards[userData.level];
-    if (newRole) {
-      const role = message.guild.roles.cache.get(newRole);
-      if (role && !message.member.roles.cache.has(role.id)) {
-        await message.member.roles.add(role);
-        rewardText = `\n🎁 ربح رول جديد: **${role.name}**`;
+    // الرسالة الأساسية
+    let messageText = `تهانينا 🥳\nتمت ترقيتك من مستوى **${oldLevel}** إلى مستوى **${userData.level}**`;
+
+    // إضافة رول جديد وإخبار المستخدم به
+    if (roleRewards[userData.level]) {
+      const newRole = message.guild.roles.cache.get(roleRewards[userData.level]);
+      if (newRole && !message.member.roles.cache.has(newRole.id)) {
+        try {
+          await message.member.roles.add(newRole);
+          messageText += `\nلقد ربحت رول: **${newRole.name}**`;
+        } catch (err) {
+          console.error(err);
+        }
       }
     }
 
-    targetChannel.send(
-      `تهانينا 🥳 ${message.author}! تمت ترقيتك من مستوى **${oldLevel}** إلى مستوى **${userData.level}**${rewardText}`
-    );
+    channel.send(messageText);
   }
 });
 
