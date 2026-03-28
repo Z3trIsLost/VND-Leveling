@@ -162,6 +162,9 @@ client.on(Events.InteractionCreate, async interaction => {
 // =====================
 // LEVELING SYSTEM
 // =====================
+// =====================
+// LEVELING SYSTEM
+// =====================
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot || !message.guild) return;
 
@@ -192,23 +195,27 @@ client.on(Events.MessageCreate, async message => {
   if (leveledUp) {
     const channel = message.guild.channels.cache.get(LEVEL_UP_CHANNEL_ID) || message.channel;
 
-    // الرسالة الأساسية
-    let messageText = `تهانينا 🥳\nتمت ترقيتك من مستوى **${oldLevel}** إلى مستوى **${userData.level}**`;
+    // الرسالة موزعة على أسطر، السطر الأول يمنشن الشخص
+    let messages = [
+      `تهانينا 🥳 ${message.author}`, // يمنشن
+      `تمت ترقيتك من مستوى **${oldLevel}** إلى مستوى **${userData.level}**`
+    ];
 
-    // إضافة رول جديد وإعلام المستخدم به
+    // إضافة رول جديد إذا ربحه
     if (roleRewards[userData.level]) {
       const newRole = message.guild.roles.cache.get(roleRewards[userData.level]);
       if (newRole && !message.member.roles.cache.has(newRole.id)) {
         try {
           await message.member.roles.add(newRole);
-          messageText += `\nلقد ربحت رول: **${newRole.name}**`;
+          messages.push(`لقد ربحت رول: **${newRole.name}**`);
         } catch (err) {
           console.error(err);
         }
       }
     }
 
-    channel.send(messageText);
+    // إرسال كل شيء في رسالة واحدة لكن كل جزء في سطره
+    channel.send(messages.join("\n"));
   }
 });
 
