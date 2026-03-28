@@ -51,8 +51,11 @@ function saveLevels(data) {
   }
 }
 
-function getXPNeeded(level) { 
-  return level * 100; 
+// =====================
+// XP NEEDED FUNCTION
+// =====================
+function getXPNeeded(level) {
+  return 120 * level; // كل مستوى يزيد 120 XP إضافية
 }
 
 // =====================
@@ -119,7 +122,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
   if (!levels[guildId]) levels[guildId] = {};
   if (!levels[guildId][userId]) {
-    levels[guildId][userId] = { xp: 0, level: 1 };
+    levels[guildId][userId] = { xp: 0, level: 0 };
     saveLevels(levels);
   }
 
@@ -168,7 +171,7 @@ client.on(Events.MessageCreate, async message => {
 
   if (!levels[guildId]) levels[guildId] = {};
   if (!levels[guildId][userId]) {
-    levels[guildId][userId] = { xp: 0, level: 1 };
+    levels[guildId][userId] = { xp: 0, level: 0 };
   }
 
   const oldLevel = levels[guildId][userId].level;
@@ -178,8 +181,8 @@ client.on(Events.MessageCreate, async message => {
   let userData = levels[guildId][userId];
   let leveledUp = false;
 
-  while (userData.xp >= getXPNeeded(userData.level)) {
-    userData.xp -= getXPNeeded(userData.level);
+  while (userData.xp >= getXPNeeded(userData.level + 1)) {
+    userData.xp -= getXPNeeded(userData.level + 1);
     userData.level += 1;
     leveledUp = true;
   }
@@ -192,7 +195,7 @@ client.on(Events.MessageCreate, async message => {
     // الرسالة الأساسية
     let messageText = `تهانينا 🥳\nتمت ترقيتك من مستوى **${oldLevel}** إلى مستوى **${userData.level}**`;
 
-    // إضافة رول جديد وإخبار المستخدم به
+    // إضافة رول جديد وإعلام المستخدم به
     if (roleRewards[userData.level]) {
       const newRole = message.guild.roles.cache.get(roleRewards[userData.level]);
       if (newRole && !message.member.roles.cache.has(newRole.id)) {
