@@ -36,13 +36,8 @@ const DATA_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH
 const LEVELS_FILE = path.join(DATA_DIR, "levels.json");
 
 // create data folder / file if not exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
-if (!fs.existsSync(LEVELS_FILE)) {
-  fs.writeFileSync(LEVELS_FILE, JSON.stringify({}, null, 2));
-}
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!fs.existsSync(LEVELS_FILE)) fs.writeFileSync(LEVELS_FILE, JSON.stringify({}, null, 2));
 
 // =====================
 // LOAD / SAVE
@@ -65,8 +60,13 @@ function saveLevels(data) {
 }
 
 function getXPNeeded(level) {
-  return level * 100;
+  return (level + 1) * 120; // كل لفل يحتاج +120 XP أكثر من قبل
 }
+
+// =====================
+// LEVEL UP CHANNEL 
+// =====================
+const LEVEL_CHANNEL_ID = "1408661076350079056"; // غيرها بالشانل تاعك
 
 // =====================
 // ROLE REWARDS
@@ -87,34 +87,19 @@ const commands = [
   new SlashCommandBuilder()
     .setName("rank")
     .setDescription("Show your current level and XP"),
-
   new SlashCommandBuilder()
     .setName("leaderboard")
     .setDescription("Show the top leveling leaderboard"),
-
   new SlashCommandBuilder()
-    .setName("setlevelchannel")
-    .setDescription("Set the channel where level up messages are sent")
-    .addChannelOption(option =>
-      option
-        .setName("channel")
-        .setDescription("Channel for level-up messages")
-        .setRequired(true)
-    )
-    .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator)
-].map(command => command.toJSON());
+    .setName("ping")
+    .setDescription("Check bot latency")
+].map(cmd => cmd.toJSON());
 
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
-
   try {
     const rest = new REST({ version: "10" }).setToken(config.token);
-
-    console.log("🔄 Registering slash commands...");
-    await rest.put(
-      Routes.applicationGuildCommands(config.clientId, config.guildId),
-      { body: commands }
-    );
+    await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), { body: commands });
     console.log("✅ Slash commands registered.");
   } catch (err) {
     console.error("❌ Error registering slash commands:", err);
@@ -132,13 +117,7 @@ client.on(Events.InteractionCreate, async interaction => {
   const userId = interaction.user.id;
 
   if (!levels[guildId]) levels[guildId] = {};
-  if (!levels[guildId][userId]) {
-    levels[guildId][userId] = {
-      xp: 0,
-      level: 1
-    };
-    saveLevels(levels);
-  }
+  if (!levels[guildId][userId]) levels[guildId][userId] = { xp: 0, level: 0, roles: [] };
 
   if (interaction.commandName === "rank") {
     const userData = levels[guildId][userId];
@@ -150,75 +129,40 @@ client.on(Events.InteractionCreate, async interaction => {
 
   if (interaction.commandName === "leaderboard") {
     const guildUsers = levels[guildId];
-
-    const sorted = Object.entries(guildUsers)
-      .sort((a, b) => b[1].xp - a[1].xp)
-      .slice(0, 10);
-
-    if (!sorted.length) {
-      return interaction.reply("مازال ما كاش داتا في leaderboard.");
-    }
-
+    const sorted = Object.entries(guildUsers).sort((a, b) => b[1].level - a[1].level || b[1].xp - a[1].xp).slice(0, 10);
+    if (!sorted.length) return interaction.reply("مازال ما كاش داتا في leaderboard.");
     let text = "🏆 **Leaderboard**\n\n";
-
     for (let i = 0; i < sorted.length; i++) {
       const [id, data] = sorted[i];
       text += `**${i + 1}.** <@${id}> — Level **${data.level}** (**${data.xp} XP**)\n`;
     }
-
     return interaction.reply(text);
   }
 
-  if (interaction.commandName === "setlevelchannel") {
-    if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      return interaction.reply({
-        content: "❌ لازم تكون Admin.",
-        ephemeral: true
-      });
-    }
-
-    const channel = interaction.options.getChannel("channel");
-
-    if (!levels[guildId]._settings) levels[guildId]._settings = {};
-    levels[guildId]._settings.levelChannelId = channel.id;
-
-    saveLevels(levels);
-
-    return interaction.reply(`✅ تم تعيين روم اللفلينج إلى ${channel}`);
+  if (interaction.commandName === "ping") {
+    return interaction.reply("🏓 Pong!");
   }
 });
 
 // =====================
 // LEVELING SYSTEM
 // =====================
-const cooldown = new Set();
-
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot || !message.guild) return;
 
   const guildId = message.guild.id;
   const userId = message.author.id;
-
   const levels = loadLevels();
 
   if (!levels[guildId]) levels[guildId] = {};
-  if (!levels[guildId][userId]) {
-    levels[guildId][userId] = {
-      xp: 0,
-      level: 1
-    };
-  }
+  if (!levels[guildId][userId]) levels[guildId][userId] = { xp: 0, level: 0, roles: [] };
 
-  const key = `${guildId}-${userId}`;
-  if (cooldown.has(key)) return;
-
-  cooldown.add(key);
-  setTimeout(() => cooldown.delete(key), 60000); // 1 min cooldown
-
-  const xpGain = Math.floor(Math.random() * 16) + 15; // 15 to 30 XP
+  // XP gain
+  const xpGain = Math.floor(Math.random() * 16) + 15; // 15-30 XP
   levels[guildId][userId].xp += xpGain;
 
   let userData = levels[guildId][userId];
+  let oldLevel = userData.level;
   let leveledUp = false;
 
   while (userData.xp >= getXPNeeded(userData.level)) {
@@ -230,39 +174,22 @@ client.on(Events.MessageCreate, async message => {
   saveLevels(levels);
 
   if (leveledUp) {
-    let targetChannel = message.channel;
-
-    if (
-      levels[guildId]._settings &&
-      levels[guildId]._settings.levelChannelId
-    ) {
-      const customChannel = message.guild.channels.cache.get(
-        levels[guildId]._settings.levelChannelId
-      );
-      if (customChannel) targetChannel = customChannel;
-    }
+    let targetChannel = message.guild.channels.cache.get(LEVEL_CHANNEL_ID) || message.channel;
 
     let rewardText = "";
-
-    if (roleRewards[userData.level] && roleRewards[userData.level] !== "PUT_ROLE_ID_LEVEL_" + userData.level) {
-      const role = message.guild.roles.cache.get(roleRewards[userData.level]);
-
-      if (role) {
-        try {
-          if (!message.member.roles.cache.has(role.id)) {
-            await message.member.roles.add(role);
-            rewardText = `\n🎁 مبروك! ربحت الرول: **${role.name}**`;
-          }
-        } catch (err) {
-          console.error(`Error giving role to ${message.author.tag}:`, err);
-        }
+    const newRole = roleRewards[userData.level];
+    if (newRole) {
+      const role = message.guild.roles.cache.get(newRole);
+      if (role && !message.member.roles.cache.has(role.id)) {
+        await message.member.roles.add(role);
+        rewardText = `\n🎁 ربح رول جديد: **${role.name}**`;
       }
     }
 
     targetChannel.send(
-      `🎉 ${message.author} مبروك! طلعت لـ **Level ${userData.level}**!${rewardText}`
+      `تهانينا 🥳 ${message.author}! تمت ترقيتك من مستوى **${oldLevel}** إلى مستوى **${userData.level}**${rewardText}`
     );
   }
 });
 
-client.login(config.token);
+client.login(process.env.Bot_Token);
