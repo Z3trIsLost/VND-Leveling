@@ -9,7 +9,9 @@ const {
   EmbedBuilder
 } = require("discord.js");
 
-const mongoose = require('mongoose'); // إضافة مكتبة المونغو
+const mongoose = require('mongoose');
+
+// إعدادات البوت (تأكد من وجود config.json أو استعمل Secrets)
 const config = require("./config.json");
 
 const client = new Client({
@@ -23,11 +25,11 @@ const client = new Client({
 });
 
 // =====================
-// MONGODB CONNECTION
+// الربط مع MongoDB
 // =====================
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('✅ تربطنا مع المونڨو يا خو!'))
-  .catch(err => console.error('❌ غلطة في المونڨو:', err));
+  .catch(err => console.error('❌ كاين غلطة في المونڨو:', err));
 
 const userSchema = new mongoose.Schema({
   guildId: String,
@@ -39,14 +41,14 @@ const userSchema = new mongoose.Schema({
 const User = mongoose.model('User', userSchema);
 
 // =====================
-// XP NEEDED FUNCTION
+// حساب الـ XP المطلوب
 // =====================
 function getXPNeeded(level) {
   return 120 * level; 
 }
 
 // =====================
-// ROLE REWARDS
+// الرولز (Role Rewards)
 // =====================
 const roleRewards = {
   1: "1486624511427346472",
@@ -60,7 +62,7 @@ const roleRewards = {
 const LEVEL_UP_CHANNEL_ID = '1408661076350079056';
 
 // =====================
-// SLASH COMMANDS
+// تسجيل الـ Slash Commands
 // =====================
 const commands = [
   new SlashCommandBuilder()
@@ -91,19 +93,18 @@ client.once(Events.ClientReady, () => {
 });
 
 // =====================
-// INTERACTION HANDLER
+// التعامل مع الأوامر (Interactions)
 // =====================
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
-  const { guildId, user } = interaction;
+  const { guildId } = interaction;
 
   if (interaction.commandName === "ping") {
     return interaction.reply("🏓 Pong!");
   }
 
   if (interaction.commandName === "xp_leaderboard") {
-    // جلب أعلى 10 من المونغو ديريكت
     const topUsers = await User.find({ guildId }).sort({ level: -1, xp: -1 }).limit(10);
 
     if (!topUsers.length) return interaction.reply("لا توجد بيانات بعد.");
@@ -119,7 +120,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const embed = new EmbedBuilder()
       .setTitle("🏆 لوحة متصدري الخبرة")
       .setDescription(description)
-      .setFooter({ text: `Requested by ${interaction.user.username}` })
+      .setColor("#FFD700")
       .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });
@@ -127,7 +128,7 @@ client.on(Events.InteractionCreate, async interaction => {
 });
 
 // =====================
-// LEVELING SYSTEM (MONGO VERSION)
+// نظام التفاعل والـ XP
 // =====================
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot || !message.guild) return;
@@ -135,7 +136,6 @@ client.on(Events.MessageCreate, async message => {
   const guildId = message.guild.id;
   const userId = message.author.id;
 
-  // حوس على المستخدم في المونغو
   let userData = await User.findOne({ guildId, userId });
   if (!userData) {
     userData = new User({ guildId, userId });
@@ -152,26 +152,23 @@ client.on(Events.MessageCreate, async message => {
     leveledUp = true;
   }
 
-  await userData.save(); // حفظ في السحاب
+  await userData.save();
 
   if (leveledUp) {
     const channel = message.guild.channels.cache.get(LEVEL_UP_CHANNEL_ID) || message.channel;
-    let messages = [
-      `تهانينا 🥳 ${message.author}`,
-      `تمت ترقيتك من مستوى **${oldLevel}** إلى مستوى **${userData.level}**`
-    ];
+    let response = `تهانينا 🥳 ${message.author}\nتمت ترقيتك من مستوى **${oldLevel}** إلى مستوى **${userData.level}**`;
 
     if (roleRewards[userData.level]) {
       const newRole = message.guild.roles.cache.get(roleRewards[userData.level]);
-      if (newRole && !message.member.roles.cache.has(newRole.id)) {
+      if (newRole) {
         try {
           await message.member.roles.add(newRole);
-          messages.push(`لقد ربحت رول: **${newRole.name}**`);
-        } catch (err) { console.error(err); }
+          response += `\nلقد ربحت رول: **${newRole.name}**`;
+        } catch (err) { console.error("Error adding role:", err); }
       }
     }
-    channel.send(messages.join("\n"));
+    channel.send(response);
   }
 });
 
-client.login(process.env.Bot_Token);
+client.login(process.env.Bot_Token || config.token);
