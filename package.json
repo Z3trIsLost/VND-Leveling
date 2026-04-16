@@ -1,12 +1,13 @@
 {
   "name": "discord-level-bot",
   "version": "1.0.0",
-  "description": "Discord leveling bot",
+  "description": "Discord leveling bot with MongoDB",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^14.18.0"
+    "discord.js": "^14.18.0",
+    "mongoose": "^8.0.0"
   }
 }
