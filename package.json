@@ -1,7 +1,7 @@
 {
   "name": "discord-level-bot",
   "version": "1.0.0",
-  "description": "Discord leveling bot with Railway persistence",
+  "description": "Discord leveling bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -9,7 +9,4 @@
   "dependencies": {
     "discord.js": "^14.18.0"
   }
-  "scripts": {
-  "start": "node index.js"
-}
 }
