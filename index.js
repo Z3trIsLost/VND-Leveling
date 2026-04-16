@@ -10,8 +10,17 @@ const {
 } = require("discord.js");
 
 const mongoose = require('mongoose');
+const http = require('http');
 
-// إعدادات البوت (تأكد من وجود config.json أو استعمل Secrets)
+// =====================
+// Web Server (باش يبقى شاعل)
+// =====================
+http.createServer((req, res) => {
+  res.write("I'm alive!");
+  res.end();
+}).listen(7860);
+
+// استيراد الإعدادات
 const config = require("./config.json");
 
 const client = new Client({
@@ -27,9 +36,15 @@ const client = new Client({
 // =====================
 // الربط مع MongoDB
 // =====================
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('✅ تربطنا مع المونڨو يا خو!'))
-  .catch(err => console.error('❌ كاين غلطة في المونڨو:', err));
+const mongoURI = process.env.MONGO_URI;
+
+if (mongoURI) {
+  mongoose.connect(mongoURI)
+    .then(() => console.log('✅ تربطنا مع المونڨو يا خو!'))
+    .catch(err => console.error('❌ كاين غلطة في المونڨو:', err));
+} else {
+  console.log("⚠️ MONGO_URI missing! Running without database.");
+}
 
 const userSchema = new mongoose.Schema({
   guildId: String,
@@ -40,16 +55,12 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema);
 
-// =====================
-// حساب الـ XP المطلوب
-// =====================
+// حساب الـ XP
 function getXPNeeded(level) {
   return 120 * level; 
 }
 
-// =====================
 // الرولز (Role Rewards)
-// =====================
 const roleRewards = {
   1: "1486624511427346472",
   10: "1486624590481588434",
@@ -65,19 +76,14 @@ const LEVEL_UP_CHANNEL_ID = '1408661076350079056';
 // تسجيل الـ Slash Commands
 // =====================
 const commands = [
-  new SlashCommandBuilder()
-    .setName("ping")
-    .setDescription("Check bot response time"),
-  new SlashCommandBuilder()
-    .setName("xp_leaderboard")
-    .setDescription("Show the XP leaderboard")
+  new SlashCommandBuilder().setName("ping").setDescription("Check bot response time"),
+  new SlashCommandBuilder().setName("xp_leaderboard").setDescription("Show the XP leaderboard")
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.Bot_Token || config.token);
 
 (async () => {
   try {
-    console.log("🔄 Registering slash commands...");
     await rest.put(
       Routes.applicationGuildCommands(config.clientId, config.guildId),
       { body: commands }
@@ -93,81 +99,74 @@ client.once(Events.ClientReady, () => {
 });
 
 // =====================
-// التعامل مع الأوامر (Interactions)
+// التعامل مع الأوامر
 // =====================
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
-
-  const { guildId } = interaction;
 
   if (interaction.commandName === "ping") {
     return interaction.reply("🏓 Pong!");
   }
 
   if (interaction.commandName === "xp_leaderboard") {
-    const topUsers = await User.find({ guildId }).sort({ level: -1, xp: -1 }).limit(10);
+    try {
+      const topUsers = await User.find({ guildId: interaction.guildId }).sort({ level: -1, xp: -1 }).limit(10);
+      if (!topUsers.length) return interaction.reply("لا توجد بيانات بعد.");
 
-    if (!topUsers.length) return interaction.reply("لا توجد بيانات بعد.");
+      let description = "";
+      for (let i = 0; i < topUsers.length; i++) {
+        const data = topUsers[i];
+        const member = await interaction.guild.members.fetch(data.userId).catch(() => null);
+        const username = member ? member.user.username : `Unknown (${data.userId})`;
+        description += `**${i + 1}.** ${username} — المستوى **${data.level}** | **${data.xp} XP**\n`;
+      }
 
-    let description = "";
-    for (let i = 0; i < topUsers.length; i++) {
-      const data = topUsers[i];
-      const member = await interaction.guild.members.fetch(data.userId).catch(() => null);
-      const username = member ? member.user.username : `Unknown (${data.userId})`;
-      description += `**${i + 1}.** ${username} — المستوى **${data.level}** | **${data.xp} XP**\n`;
+      const embed = new EmbedBuilder().setTitle("🏆 لوحة متصدري الخبرة").setDescription(description).setColor("#FFD700");
+      return interaction.reply({ embeds: [embed] });
+    } catch (err) {
+      console.error(err);
+      interaction.reply("حدث خطأ أثناء جلب البيانات.");
     }
-
-    const embed = new EmbedBuilder()
-      .setTitle("🏆 لوحة متصدري الخبرة")
-      .setDescription(description)
-      .setColor("#FFD700")
-      .setTimestamp();
-
-    return interaction.reply({ embeds: [embed] });
   }
 });
 
 // =====================
-// نظام التفاعل والـ XP
+// نظام الـ XP
 // =====================
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot || !message.guild) return;
 
-  const guildId = message.guild.id;
-  const userId = message.author.id;
+  try {
+    let userData = await User.findOne({ guildId: message.guild.id, userId: message.author.id });
+    if (!userData) userData = new User({ guildId: message.guild.id, userId: message.author.id });
 
-  let userData = await User.findOne({ guildId, userId });
-  if (!userData) {
-    userData = new User({ guildId, userId });
-  }
+    const oldLevel = userData.level;
+    userData.xp += Math.floor(Math.random() * 16) + 15;
 
-  const oldLevel = userData.level;
-  const xpGain = Math.floor(Math.random() * 16) + 15;
-  userData.xp += xpGain;
-
-  let leveledUp = false;
-  while (userData.xp >= getXPNeeded(userData.level + 1)) {
-    userData.xp -= getXPNeeded(userData.level + 1);
-    userData.level += 1;
-    leveledUp = true;
-  }
-
-  await userData.save();
-
-  if (leveledUp) {
-    const channel = message.guild.channels.cache.get(LEVEL_UP_CHANNEL_ID) || message.channel;
-    let response = `تهانينا 🥳 ${message.author}\nتمت ترقيتك من مستوى **${oldLevel}** إلى مستوى **${userData.level}**`;
-
-    if (roleRewards[userData.level]) {
-      const newRole = message.guild.roles.cache.get(roleRewards[userData.level]);
-      if (newRole) {
-        try {
-          await message.member.roles.add(newRole);
-          response += `\nلقد ربحت رول: **${newRole.name}**`;
-        } catch (err) { console.error("Error adding role:", err); }
-      }
+    let leveledUp = false;
+    while (userData.xp >= getXPNeeded(userData.level + 1)) {
+      userData.xp -= getXPNeeded(userData.level + 1);
+      userData.level += 1;
+      leveledUp = true;
     }
-    channel.send(response);
+
+    await userData.save();
+
+    if (leveledUp) {
+      const channel = message.guild.channels.cache.get(LEVEL_UP_CHANNEL_ID) || message.channel;
+      let response = `تهانينا 🥳 ${message.author}\nتمت ترقيتك للمستوى **${userData.level}**`;
+
+      if (roleRewards[userData.level]) {
+        const newRole = message.guild.roles.cache.get(roleRewards[userData.level]);
+        if (newRole) {
+          await message.member.roles.add(newRole).catch(() => null);
+          response += `\nلقد ربحت رول: **${newRole.name}**`;
+        }
+      }
+      channel.send(response);
+    }
+  } catch (err) {
+    console.error("XP System Error:", err);
   }
 });
 
