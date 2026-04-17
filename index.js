@@ -13,14 +13,13 @@ const mongoose = require('mongoose');
 const http = require('http');
 
 // =====================
-// Web Server (باش يبقى شاعل)
+// Web Server (Keep-Alive)
 // =====================
 http.createServer((req, res) => {
   res.write("I'm alive!");
   res.end();
 }).listen(7860);
 
-// استيراد الإعدادات
 const config = require("./config.json");
 
 const client = new Client({
@@ -34,7 +33,7 @@ const client = new Client({
 });
 
 // =====================
-// الربط مع MongoDB
+// MongoDB Connection
 // =====================
 const mongoURI = process.env.MONGO_URI;
 
@@ -42,8 +41,6 @@ if (mongoURI) {
   mongoose.connect(mongoURI)
     .then(() => console.log('✅ تربطنا مع المونڨو يا خو!'))
     .catch(err => console.error('❌ كاين غلطة في المونڨو:', err));
-} else {
-  console.log("⚠️ MONGO_URI missing! Running without database.");
 }
 
 const userSchema = new mongoose.Schema({
@@ -55,12 +52,10 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema);
 
-// حساب الـ XP
 function getXPNeeded(level) {
   return 120 * level; 
 }
 
-// الرولز (Role Rewards)
 const roleRewards = {
   1: "1486624511427346472",
   10: "1486624590481588434",
@@ -73,7 +68,7 @@ const roleRewards = {
 const LEVEL_UP_CHANNEL_ID = '1408661076350079056';
 
 // =====================
-// تسجيل الـ Slash Commands
+// Slash Commands
 // =====================
 const commands = [
   new SlashCommandBuilder().setName("ping").setDescription("Check bot response time"),
@@ -88,9 +83,9 @@ const rest = new REST({ version: "10" }).setToken(process.env.Bot_Token || confi
       Routes.applicationGuildCommands(config.clientId, config.guildId),
       { body: commands }
     );
-    console.log("✅ Slash commands registered successfully.");
+    console.log("✅ Slash commands registered.");
   } catch (error) {
-    console.error("❌ Error registering slash commands:", error);
+    console.error("❌ Slash Error:", error);
   }
 })();
 
@@ -99,7 +94,7 @@ client.once(Events.ClientReady, () => {
 });
 
 // =====================
-// التعامل مع الأوامر
+// Command Handling
 // =====================
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
@@ -116,12 +111,15 @@ client.on(Events.InteractionCreate, async interaction => {
       let description = "";
       for (let i = 0; i < topUsers.length; i++) {
         const data = topUsers[i];
-        const member = await interaction.guild.members.fetch(data.userId).catch(() => null);
-        const username = member ? member.user.username : `Unknown (${data.userId})`;
-        description += `**${i + 1}.** ${username} — المستوى **${data.level}** | **${data.xp} XP**\n`;
+        // التعديل هنا: يطاقي المستخدم باستعمال الـ ID ديريكت
+        description += `**${i + 1}.** <@${data.userId}> — المستوى **${data.level}** | **${data.xp} XP**\n`;
       }
 
-      const embed = new EmbedBuilder().setTitle("🏆 لوحة متصدري الخبرة").setDescription(description).setColor("#FFD700");
+      const embed = new EmbedBuilder()
+        .setTitle("🏆 لوحة متصدري الخبرة")
+        .setDescription(description)
+        .setColor("#FFD700");
+
       return interaction.reply({ embeds: [embed] });
     } catch (err) {
       console.error(err);
@@ -131,7 +129,7 @@ client.on(Events.InteractionCreate, async interaction => {
 });
 
 // =====================
-// نظام الـ XP
+// XP System Logic
 // =====================
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot || !message.guild) return;
@@ -140,7 +138,6 @@ client.on(Events.MessageCreate, async message => {
     let userData = await User.findOne({ guildId: message.guild.id, userId: message.author.id });
     if (!userData) userData = new User({ guildId: message.guild.id, userId: message.author.id });
 
-    const oldLevel = userData.level;
     userData.xp += Math.floor(Math.random() * 16) + 15;
 
     let leveledUp = false;
@@ -154,7 +151,7 @@ client.on(Events.MessageCreate, async message => {
 
     if (leveledUp) {
       const channel = message.guild.channels.cache.get(LEVEL_UP_CHANNEL_ID) || message.channel;
-      let response = `تهانينا 🥳 ${message.author}\nتمت ترقيتك للمستوى **${userData.level}**`;
+      let response = `تهانينا 🥳 <@${message.author.id}>\nتمت ترقيتك للمستوى **${userData.level}**`;
 
       if (roleRewards[userData.level]) {
         const newRole = message.guild.roles.cache.get(roleRewards[userData.level]);
@@ -166,7 +163,7 @@ client.on(Events.MessageCreate, async message => {
       channel.send(response);
     }
   } catch (err) {
-    console.error("XP System Error:", err);
+    console.error("XP Error:", err);
   }
 });
 
