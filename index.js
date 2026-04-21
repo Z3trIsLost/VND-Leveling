@@ -1,24 +1,12 @@
-const { 
-  Client, 
-  GatewayIntentBits, 
-  Partials, 
-  Events, 
-  REST, 
-  Routes, 
-  SlashCommandBuilder,
-  EmbedBuilder
-} = require("discord.js");
-
+const { Client, GatewayIntentBits, Partials, Events, REST, Routes, SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const mongoose = require('mongoose');
 const http = require('http');
 
-// =====================
-// Web Server (باش يبقى شاعل)
-// =====================
+// 1. فتح السيرفر فوراً باش Hugging Face يعطيك Running
 http.createServer((req, res) => {
-  res.write("I'm alive!");
+  res.write("Bot is Running!");
   res.end();
-}).listen(7860);
+}).listen(7860, () => console.log("🌐 Web Server Ready on 7860"));
 
 const config = require("./config.json");
 
@@ -32,109 +20,68 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-// =====================
-// MongoDB Connection
-// =====================
+// 2. الربط مع المونغو (بدون تعطيل البوت)
 const mongoURI = process.env.MONGO_URI;
 if (mongoURI) {
   mongoose.connect(mongoURI)
     .then(() => console.log('✅ تربطنا مع المونڨو يا خو!'))
-    .catch(err => console.error('❌ غلطة في المونڨو:', err));
+    .catch(err => console.error('❌ غلطة مونغو:', err));
 }
 
-const userSchema = new mongoose.Schema({
-  guildId: String,
-  userId: String,
-  xp: { type: Number, default: 0 },
-  level: { type: Number, default: 0 }
-});
-const User = mongoose.model('User', userSchema);
+const User = mongoose.model('User', new mongoose.Schema({
+  guildId: String, userId: String, xp: { type: Number, default: 0 }, level: { type: Number, default: 0 }
+}));
 
-const roleRewards = {
-  1: "1486624511427346472", 10: "1486624590481588434",
-  20: "1486624679811612792", 30: "1486624772833153026",
-  50: "1486625010645991505", 70: "1486625237570424936"
-};
-const LEVEL_UP_CHANNEL_ID = '1408661076350079056';
-
-// =====================
-// تسجيل الأوامر (نسخة مضادة للـ Timeout)
-// =====================
+// 3. تسجيل الأوامر (في الخلفية باش ما يحبسش الـ Startup)
 const commands = [
   new SlashCommandBuilder().setName("ping").setDescription("Check bot response time"),
   new SlashCommandBuilder().setName("xp_leaderboard").setDescription("Show the XP leaderboard")
-].map(command => command.toJSON());
+].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.Bot_Token || config.token);
 
-client.once(Events.ClientReady, async () => {
-  console.log(`✅ البوت شغال باسم: ${client.user.tag}`);
-  
-  // نسجلو الأوامر هنا بعد ما يشعل البوت باش ما نحبسوش العملية
+async function safeRegister() {
   try {
+    console.log("⏳ جاري محاولة تسجيل الأوامر...");
     await rest.put(
       Routes.applicationGuildCommands(config.clientId, config.guildId),
       { body: commands }
     );
-    console.log("✅ تم تحديث الأوامر بنجاح!");
-  } catch (error) {
-    console.log("⚠️ فشل تسجيل الأوامر بسبب الإنترنت، بصح البوت يبقى شغال.");
+    console.log("✅ تم تسجيل الأوامر!");
+  } catch (e) {
+    console.log("⚠️ فشل تسجيل الأوامر (Timeout)، البوت سيعمل بدونها مؤقتاً.");
   }
+}
+
+client.once(Events.ClientReady, () => {
+  console.log(`✅ ${client.user.tag} واجد يا خو!`);
+  safeRegister();
 });
 
-// =====================
-// Command Handling
-// =====================
+// 4. معالجة الأوامر والـ XP
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
-
-  if (interaction.commandName === "ping") return interaction.reply("🏓 Pong!");
-
   if (interaction.commandName === "xp_leaderboard") {
-    try {
-      await interaction.deferReply();
-      const topUsers = await User.find({ guildId: interaction.guildId }).sort({ level: -1, xp: -1 }).limit(10);
-      
-      let description = "";
-      for (let i = 0; i < topUsers.length; i++) {
-        const data = topUsers[i];
-        try { await interaction.guild.members.fetch(data.userId); } catch (e) {}
-        description += `**${i + 1}.** <@${data.userId}> — مستوى **${data.level}** | **${data.xp} XP**\n`;
-      }
-
-      const embed = new EmbedBuilder().setTitle("🏆 لوحة المتصدرين").setDescription(description || "لا توجد بيانات").setColor("#FFD700");
-      return interaction.editReply({ embeds: [embed] });
-    } catch (err) {
-      console.error(err);
-      if (interaction.deferred) interaction.editReply("حدث خطأ.");
+    await interaction.deferReply();
+    const top = await User.find({ guildId: interaction.guildId }).sort({ level: -1, xp: -1 }).limit(10);
+    let desc = "";
+    for (let i = 0; i < top.length; i++) {
+      try { await interaction.guild.members.fetch(top[i].userId); } catch (e) {}
+      desc += `**${i + 1}.** <@${top[i].userId}> — مستوى **${top[i].level}**\n`;
     }
+    await interaction.editReply({ embeds: [new EmbedBuilder().setTitle("🏆 المتصدرين").setDescription(desc || "لا يوجد بيانات").setColor("#FFD700")] });
   }
 });
 
-// =====================
-// نظام الـ XP
-// =====================
-client.on(Events.MessageCreate, async message => {
-  if (message.author.bot || !message.guild) return;
+client.on(Events.MessageCreate, async m => {
+  if (m.author.bot || !m.guild) return;
   try {
-    let userData = await User.findOne({ guildId: message.guild.id, userId: message.author.id });
-    if (!userData) userData = new User({ guildId: message.guild.id, userId: message.author.id });
-
-    userData.xp += Math.floor(Math.random() * 15) + 15;
-    let leveledUp = false;
-    while (userData.xp >= (120 * (userData.level + 1))) {
-      userData.xp -= (120 * (userData.level + 1));
-      userData.level += 1;
-      leveledUp = true;
-    }
-    await userData.save();
-
-    if (leveledUp) {
-      const channel = message.guild.channels.cache.get(LEVEL_UP_CHANNEL_ID) || message.channel;
-      let response = `مبروك 🥳 <@${message.author.id}> طلعت للمستوى **${userData.level}**`;
-      channel.send(response);
-    }
-  } catch (err) { console.error("XP Error:", err); }
+    let u = await User.findOne({ guildId: m.guild.id, userId: m.author.id }) || new User({ guildId: m.guild.id, userId: m.author.id });
+    u.xp += Math.floor(Math.random() * 15) + 15;
+    if (u.xp >= (120 * (u.level + 1))) { u.xp = 0; u.level++; m.channel.send(`مبروك <@${m.author.id}> طلعت للمستوى **${u.level}**`); }
+    await u.save();
+  } catch (e) {}
 });
 
-client.login(process.env.Bot_Token || config.token);
+// تشغيل البوت
+client.login(process.env.Bot_Token || config.token).catch(e => console.error("❌ Login Error:", e));
