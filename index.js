@@ -13,7 +13,7 @@ const mongoose = require('mongoose');
 const http = require('http');
 
 // =====================
-// Web Server (باش يبقى شاعل 24/7)
+// Web Server (باش يبقى شاعل)
 // =====================
 http.createServer((req, res) => {
   res.write("I'm alive!");
@@ -50,8 +50,6 @@ const userSchema = new mongoose.Schema({
 });
 const User = mongoose.model('User', userSchema);
 
-function getXPNeeded(level) { return 120 * level; }
-
 const roleRewards = {
   1: "1486624511427346472", 10: "1486624590481588434",
   20: "1486624679811612792", 30: "1486624772833153026",
@@ -69,26 +67,23 @@ const commands = [
 
 const rest = new REST({ version: "10" }).setToken(process.env.Bot_Token || config.token);
 
-async function registerCommands() {
+client.once(Events.ClientReady, async () => {
+  console.log(`✅ البوت شغال باسم: ${client.user.tag}`);
+  
+  // نسجلو الأوامر هنا بعد ما يشعل البوت باش ما نحبسوش العملية
   try {
-    console.log("⏳ جاري تسجيل الأوامر...");
     await rest.put(
       Routes.applicationGuildCommands(config.clientId, config.guildId),
       { body: commands }
     );
-    console.log("✅ تم تسجيل الأوامر بنجاح!");
+    console.log("✅ تم تحديث الأوامر بنجاح!");
   } catch (error) {
-    console.error("⚠️ فشل تسجيل الأوامر (بصياح ديسكورد)، بصح البوت راح يكمل يشعل عادي.");
+    console.log("⚠️ فشل تسجيل الأوامر بسبب الإنترنت، بصح البوت يبقى شغال.");
   }
-}
-
-client.once(Events.ClientReady, () => {
-  console.log(`✅ البوت شغال باسم: ${client.user.tag}`);
-  registerCommands(); // نسجلوهم هنا باش ما نحبسوش الـ Start
 });
 
 // =====================
-// Command Handling (مع الـ Mention الملونة)
+// Command Handling
 // =====================
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
@@ -99,8 +94,7 @@ client.on(Events.InteractionCreate, async interaction => {
     try {
       await interaction.deferReply();
       const topUsers = await User.find({ guildId: interaction.guildId }).sort({ level: -1, xp: -1 }).limit(10);
-      if (!topUsers.length) return interaction.editReply("ماكاش بيانات.");
-
+      
       let description = "";
       for (let i = 0; i < topUsers.length; i++) {
         const data = topUsers[i];
@@ -108,11 +102,11 @@ client.on(Events.InteractionCreate, async interaction => {
         description += `**${i + 1}.** <@${data.userId}> — مستوى **${data.level}** | **${data.xp} XP**\n`;
       }
 
-      const embed = new EmbedBuilder().setTitle("🏆 لوحة المتصدرين").setDescription(description).setColor("#FFD700");
+      const embed = new EmbedBuilder().setTitle("🏆 لوحة المتصدرين").setDescription(description || "لا توجد بيانات").setColor("#FFD700");
       return interaction.editReply({ embeds: [embed] });
     } catch (err) {
       console.error(err);
-      if (interaction.deferred) interaction.editReply("غلطة في السيرفر.");
+      if (interaction.deferred) interaction.editReply("حدث خطأ.");
     }
   }
 });
@@ -128,8 +122,8 @@ client.on(Events.MessageCreate, async message => {
 
     userData.xp += Math.floor(Math.random() * 15) + 15;
     let leveledUp = false;
-    while (userData.xp >= getXPNeeded(userData.level + 1)) {
-      userData.xp -= getXPNeeded(userData.level + 1);
+    while (userData.xp >= (120 * (userData.level + 1))) {
+      userData.xp -= (120 * (userData.level + 1));
       userData.level += 1;
       leveledUp = true;
     }
@@ -138,10 +132,6 @@ client.on(Events.MessageCreate, async message => {
     if (leveledUp) {
       const channel = message.guild.channels.cache.get(LEVEL_UP_CHANNEL_ID) || message.channel;
       let response = `مبروك 🥳 <@${message.author.id}> طلعت للمستوى **${userData.level}**`;
-      if (roleRewards[userData.level]) {
-        const role = message.guild.roles.cache.get(roleRewards[userData.level]);
-        if (role) { await message.member.roles.add(role).catch(() => null); response += `\nديت رول: **${role.name}**`; }
-      }
       channel.send(response);
     }
   } catch (err) { console.error("XP Error:", err); }
