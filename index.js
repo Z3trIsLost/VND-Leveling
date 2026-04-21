@@ -13,7 +13,7 @@ const mongoose = require('mongoose');
 const http = require('http');
 
 // =====================
-// Web Server (Keep-Alive)
+// Web Server (باش يبقى شاعل 24/7)
 // =====================
 http.createServer((req, res) => {
   res.write("I'm alive!");
@@ -36,11 +36,10 @@ const client = new Client({
 // MongoDB Connection
 // =====================
 const mongoURI = process.env.MONGO_URI;
-
 if (mongoURI) {
   mongoose.connect(mongoURI)
     .then(() => console.log('✅ تربطنا مع المونڨو يا خو!'))
-    .catch(err => console.error('❌ كاين غلطة في المونڨو:', err));
+    .catch(err => console.error('❌ غلطة في المونڨو:', err));
 }
 
 const userSchema = new mongoose.Schema({
@@ -49,26 +48,19 @@ const userSchema = new mongoose.Schema({
   xp: { type: Number, default: 0 },
   level: { type: Number, default: 0 }
 });
-
 const User = mongoose.model('User', userSchema);
 
-function getXPNeeded(level) {
-  return 120 * level; 
-}
+function getXPNeeded(level) { return 120 * level; }
 
 const roleRewards = {
-  1: "1486624511427346472",
-  10: "1486624590481588434",
-  20: "1486624679811612792",
-  30: "1486624772833153026",
-  50: "1486625010645991505",
-  70: "1486625237570424936"
+  1: "1486624511427346472", 10: "1486624590481588434",
+  20: "1486624679811612792", 30: "1486624772833153026",
+  50: "1486625010645991505", 70: "1486625237570424936"
 };
-
 const LEVEL_UP_CHANNEL_ID = '1408661076350079056';
 
 // =====================
-// Slash Commands
+// تسجيل الأوامر (نسخة مضادة للـ Timeout)
 // =====================
 const commands = [
   new SlashCommandBuilder().setName("ping").setDescription("Check bot response time"),
@@ -77,94 +69,82 @@ const commands = [
 
 const rest = new REST({ version: "10" }).setToken(process.env.Bot_Token || config.token);
 
-(async () => {
+async function registerCommands() {
   try {
+    console.log("⏳ جاري تسجيل الأوامر...");
     await rest.put(
       Routes.applicationGuildCommands(config.clientId, config.guildId),
       { body: commands }
     );
-    console.log("✅ Slash commands registered.");
+    console.log("✅ تم تسجيل الأوامر بنجاح!");
   } catch (error) {
-    console.error("❌ Slash Error:", error);
+    console.error("⚠️ فشل تسجيل الأوامر (بصياح ديسكورد)، بصح البوت راح يكمل يشعل عادي.");
   }
-})();
+}
 
 client.once(Events.ClientReady, () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
+  console.log(`✅ البوت شغال باسم: ${client.user.tag}`);
+  registerCommands(); // نسجلوهم هنا باش ما نحبسوش الـ Start
 });
 
 // =====================
-// Command Handling
+// Command Handling (مع الـ Mention الملونة)
 // =====================
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
-  if (interaction.commandName === "ping") {
-    return interaction.reply("🏓 Pong!");
-  }
+  if (interaction.commandName === "ping") return interaction.reply("🏓 Pong!");
 
   if (interaction.commandName === "xp_leaderboard") {
     try {
+      await interaction.deferReply();
       const topUsers = await User.find({ guildId: interaction.guildId }).sort({ level: -1, xp: -1 }).limit(10);
-      if (!topUsers.length) return interaction.reply("لا توجد بيانات بعد.");
+      if (!topUsers.length) return interaction.editReply("ماكاش بيانات.");
 
       let description = "";
       for (let i = 0; i < topUsers.length; i++) {
         const data = topUsers[i];
-        // التعديل هنا: يطاقي المستخدم باستعمال الـ ID ديريكت
-        description += `**${i + 1}.** <@${data.userId}> — المستوى **${data.level}** | **${data.xp} XP**\n`;
+        try { await interaction.guild.members.fetch(data.userId); } catch (e) {}
+        description += `**${i + 1}.** <@${data.userId}> — مستوى **${data.level}** | **${data.xp} XP**\n`;
       }
 
-      const embed = new EmbedBuilder()
-        .setTitle("🏆 لوحة متصدري الخبرة")
-        .setDescription(description)
-        .setColor("#FFD700");
-
-      return interaction.reply({ embeds: [embed] });
+      const embed = new EmbedBuilder().setTitle("🏆 لوحة المتصدرين").setDescription(description).setColor("#FFD700");
+      return interaction.editReply({ embeds: [embed] });
     } catch (err) {
       console.error(err);
-      interaction.reply("حدث خطأ أثناء جلب البيانات.");
+      if (interaction.deferred) interaction.editReply("غلطة في السيرفر.");
     }
   }
 });
 
 // =====================
-// XP System Logic
+// نظام الـ XP
 // =====================
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot || !message.guild) return;
-
   try {
     let userData = await User.findOne({ guildId: message.guild.id, userId: message.author.id });
     if (!userData) userData = new User({ guildId: message.guild.id, userId: message.author.id });
 
-    userData.xp += Math.floor(Math.random() * 16) + 15;
-
+    userData.xp += Math.floor(Math.random() * 15) + 15;
     let leveledUp = false;
     while (userData.xp >= getXPNeeded(userData.level + 1)) {
       userData.xp -= getXPNeeded(userData.level + 1);
       userData.level += 1;
       leveledUp = true;
     }
-
     await userData.save();
 
     if (leveledUp) {
       const channel = message.guild.channels.cache.get(LEVEL_UP_CHANNEL_ID) || message.channel;
-      let response = `تهانينا 🥳 <@${message.author.id}>\nتمت ترقيتك للمستوى **${userData.level}**`;
-
+      let response = `مبروك 🥳 <@${message.author.id}> طلعت للمستوى **${userData.level}**`;
       if (roleRewards[userData.level]) {
-        const newRole = message.guild.roles.cache.get(roleRewards[userData.level]);
-        if (newRole) {
-          await message.member.roles.add(newRole).catch(() => null);
-          response += `\nلقد ربحت رول: **${newRole.name}**`;
-        }
+        const role = message.guild.roles.cache.get(roleRewards[userData.level]);
+        if (role) { await message.member.roles.add(role).catch(() => null); response += `\nديت رول: **${role.name}**`; }
       }
       channel.send(response);
     }
-  } catch (err) {
-    console.error("XP Error:", err);
-  }
+  } catch (err) { console.error("XP Error:", err); }
 });
 
 client.login(process.env.Bot_Token || config.token);
