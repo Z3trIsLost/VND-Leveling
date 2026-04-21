@@ -2,9 +2,9 @@ const { Client, GatewayIntentBits, Partials, Events, REST, Routes, SlashCommandB
 const mongoose = require('mongoose');
 const http = require('http');
 
-// 1. فتح السيرفر فوراً باش Hugging Face يعطيك Running
+// 1. فتح السيرفر فوراً باش الـ Space تبقى Running
 http.createServer((req, res) => {
-  res.write("Bot is Running!");
+  res.write("Bot is Alive and Retrying...");
   res.end();
 }).listen(7860, () => console.log("🌐 Web Server Ready on 7860"));
 
@@ -20,7 +20,7 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-// 2. الربط مع المونغو (بدون تعطيل البوت)
+// 2. الربط مع المونغو
 const mongoURI = process.env.MONGO_URI;
 if (mongoURI) {
   mongoose.connect(mongoURI)
@@ -32,7 +32,7 @@ const User = mongoose.model('User', new mongoose.Schema({
   guildId: String, userId: String, xp: { type: Number, default: 0 }, level: { type: Number, default: 0 }
 }));
 
-// 3. تسجيل الأوامر (في الخلفية باش ما يحبسش الـ Startup)
+// 3. تسجيل الأوامر
 const commands = [
   new SlashCommandBuilder().setName("ping").setDescription("Check bot response time"),
   new SlashCommandBuilder().setName("xp_leaderboard").setDescription("Show the XP leaderboard")
@@ -40,36 +40,26 @@ const commands = [
 
 const rest = new REST({ version: "10" }).setToken(process.env.Bot_Token || config.token);
 
-async function safeRegister() {
-  try {
-    console.log("⏳ جاري محاولة تسجيل الأوامر...");
-    await rest.put(
-      Routes.applicationGuildCommands(config.clientId, config.guildId),
-      { body: commands }
-    );
-    console.log("✅ تم تسجيل الأوامر!");
-  } catch (e) {
-    console.log("⚠️ فشل تسجيل الأوامر (Timeout)، البوت سيعمل بدونها مؤقتاً.");
-  }
-}
-
-client.once(Events.ClientReady, () => {
+client.once(Events.ClientReady, async () => {
   console.log(`✅ ${client.user.tag} واجد يا خو!`);
-  safeRegister();
+  try {
+    await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), { body: commands });
+    console.log("✅ تم تسجيل الأوامر!");
+  } catch (e) { console.log("⚠️ فشل تسجيل الأوامر، راح يخدم بالأوامر القديمة."); }
 });
 
 // 4. معالجة الأوامر والـ XP
-client.on(Events.InteractionCreate, async interaction => {
-  if (!interaction.isChatInputCommand()) return;
-  if (interaction.commandName === "xp_leaderboard") {
-    await interaction.deferReply();
-    const top = await User.find({ guildId: interaction.guildId }).sort({ level: -1, xp: -1 }).limit(10);
+client.on(Events.InteractionCreate, async i => {
+  if (!i.isChatInputCommand()) return;
+  if (i.commandName === "xp_leaderboard") {
+    await i.deferReply();
+    const top = await User.find({ guildId: i.guildId }).sort({ level: -1, xp: -1 }).limit(10);
     let desc = "";
-    for (let i = 0; i < top.length; i++) {
-      try { await interaction.guild.members.fetch(top[i].userId); } catch (e) {}
-      desc += `**${i + 1}.** <@${top[i].userId}> — مستوى **${top[i].level}**\n`;
+    for (let j = 0; j < top.length; j++) {
+      try { await i.guild.members.fetch(top[j].userId); } catch (e) {}
+      desc += `**${j + 1}.** <@${top[j].userId}> — مستوى **${top[j].level}**\n`;
     }
-    await interaction.editReply({ embeds: [new EmbedBuilder().setTitle("🏆 المتصدرين").setDescription(desc || "لا يوجد بيانات").setColor("#FFD700")] });
+    await i.editReply({ embeds: [new EmbedBuilder().setTitle("🏆 المتصدرين").setDescription(desc || "لا يوجد بيانات").setColor("#FFD700")] });
   }
 });
 
@@ -83,5 +73,13 @@ client.on(Events.MessageCreate, async m => {
   } catch (e) {}
 });
 
-// تشغيل البوت
-client.login(process.env.Bot_Token || config.token).catch(e => console.error("❌ Login Error:", e));
+// 5. وظيفة الـ Login الذكية (إعادة المحاولة في حال الـ Timeout)
+function startBot() {
+  console.log("⏳ محاولة الاتصال بديسكورد...");
+  client.login(process.env.Bot_Token || config.token).catch(err => {
+    console.error("❌ فشل الـ Login (Timeout غالباً). سأعيد المحاولة بعد 10 ثواني...");
+    setTimeout(startBot, 10000); // يعاود المحاولة كل 10 ثواني
+  });
+}
+
+startBot();
