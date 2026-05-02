@@ -13,14 +13,23 @@ const mongoose = require('mongoose');
 const http = require('http');
 
 // =====================
-// 1. Web Server (باش الـ Space تبقى Running)
+// 1. Web Server (باش الـ Render و Cron-job يقدروا يلحقوا ليه)
 // =====================
+const port = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.write("I'm alive and patient!");
   res.end();
-}).listen(7860);
+}).listen(port, () => {
+  console.log(`✅ Web Server is running on port ${port}`);
+});
 
-const config = require("./config.json");
+// محاولة جلب الإعدادات من الملف المحلي (فقط للـ Local) أو من الـ Environment Variables
+let config = {};
+try {
+  config = require("./config.json");
+} catch (e) {
+  // إذا الملف مش موجود (كيما في Render)، راح يستعمل process.env ديريكت
+}
 
 const client = new Client({
   intents: [
@@ -35,7 +44,7 @@ const client = new Client({
 // =====================
 // 2. MongoDB Connection
 // =====================
-const mongoURI = process.env.MONGO_URI;
+const mongoURI = process.env.MONGO_URI || config.mongoURI;
 
 if (mongoURI) {
   mongoose.connect(mongoURI)
@@ -71,31 +80,36 @@ const roleRewards = {
 const LEVEL_UP_CHANNEL_ID = '1408661076350079056';
 
 // =====================
-// 4. Slash Commands (تسجيل الأوامر القديمة)
+// 4. Slash Commands
 // =====================
 const commands = [
   new SlashCommandBuilder().setName("ping").setDescription("Check bot response time"),
   new SlashCommandBuilder().setName("xp_leaderboard").setDescription("Show the XP leaderboard")
 ].map(command => command.toJSON());
 
-const rest = new REST({ version: "10" }).setToken(process.env.Bot_Token || config.token);
+const botToken = process.env.BOT_TOKEN || config.token;
+const clientId = process.env.CLIENT_ID || config.clientId;
+const guildId = process.env.GUILD_ID || config.guildId;
 
-// تسجيل الأوامر بعد ما يشعل البوت باش ما يتبلوكاش
+const rest = new REST({ version: "10" }).setToken(botToken);
+
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
   try {
-    await rest.put(
-      Routes.applicationGuildCommands(config.clientId, config.guildId),
-      { body: commands }
-    );
-    console.log("✅ Slash commands registered.");
+    if (clientId && guildId) {
+      await rest.put(
+        Routes.applicationGuildCommands(clientId, guildId),
+        { body: commands }
+      );
+      console.log("✅ Slash commands registered.");
+    }
   } catch (error) {
     console.log("⚠️ تأخر في تسجيل الأوامر، لكن البوت شغال.");
   }
 });
 
 // =====================
-// 5. Command Handling (الـ Leaderboard القديمة)
+// 5. Command Handling
 // =====================
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
@@ -106,7 +120,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
   if (interaction.commandName === "xp_leaderboard") {
     try {
-      await interaction.deferReply(); // نمدو وقت للبوت باش يجيب المعلومات
+      await interaction.deferReply(); 
 
       const topUsers = await User.find({ guildId: interaction.guildId })
         .sort({ level: -1, xp: -1 })
@@ -117,12 +131,9 @@ client.on(Events.InteractionCreate, async interaction => {
       let description = "";
       for (let i = 0; i < topUsers.length; i++) {
         const data = topUsers[i];
-        
-        // جلب معلومات العضو باش الـ Mention تخدم وتخرج زرقاء
         try {
           await interaction.guild.members.fetch(data.userId);
         } catch (e) {}
-
         description += `**${i + 1}.** <@${data.userId}> — المستوى **${data.level}** | **${data.xp} XP**\n`;
       }
 
@@ -144,7 +155,7 @@ client.on(Events.InteractionCreate, async interaction => {
 });
 
 // =====================
-// 6. XP System Logic (القديم)
+// 6. XP System Logic
 // =====================
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot || !message.guild) return;
@@ -183,12 +194,13 @@ client.on(Events.MessageCreate, async message => {
 });
 
 // =====================
-// 7. ميزة الصبر (الـ Refresh كل 10 ثواني)
+// 7. ميزة الصبر
 // =====================
 function startBot() {
-  client.login(process.env.Bot_Token || config.token).catch(err => {
+  if (!botToken) return console.error("❌ BOT_TOKEN is missing!");
+  client.login(botToken).catch(err => {
     console.error("❌ فشل الاتصال (Timeout). سأعيد المحاولة بعد 10 ثواني...");
-    setTimeout(startBot, 10000); // هادي هي اللي تخليه يعاود وحدو كل 10 ثواني
+    setTimeout(startBot, 10000);
   });
 }
 
