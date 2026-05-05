@@ -193,9 +193,7 @@ client.on(Events.MessageCreate, async message => {
   }
 });
 
-// =====================
-// 7. ميزة الصبر
-// =====================
+
 function startBot() {
   if (!botToken) return console.error("❌ BOT_TOKEN is missing!");
   client.login(botToken).catch(err => {
