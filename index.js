@@ -12,9 +12,9 @@ const {
 const mongoose = require('mongoose');
 const http = require('http');
 
-// =====================
-// 1. Web Server (باش الـ Render و Cron-job يقدروا يلحقوا ليه)
-// =====================
+// ==========================================
+// 1. Web Server (باش يبقى البوت شاعل في Render)
+// ==========================================
 const port = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.write("I'm alive and patient!");
@@ -23,14 +23,62 @@ http.createServer((req, res) => {
   console.log(`✅ Web Server is running on port ${port}`);
 });
 
-// محاولة جلب الإعدادات من الملف المحلي (فقط للـ Local) أو من الـ Environment Variables
-let config = {};
-try {
-  config = require("./config.json");
-} catch (e) {
-  // إذا الملف مش موجود (كيما في Render)، راح يستعمل process.env ديريكت
+// ==========================================
+// 2. إعدادات السيرفرات (A و B)
+// ==========================================
+const guildConfigs = {
+  // إعدادات السيرفر الأول (A) - خليهم كيما راهم
+  "1486337190580715560": { 
+    levelUpChannel: "1408661076350079056",
+    roleRewards: {
+      1: "1486624511427346472",
+      10: "1486624590481588434",
+      20: "1486624679811612792",
+      30: "1486624772833153026",
+      50: "1486625010645991505",
+      70: "1486625237570424936"
+    }
+  },
+  // إعدادات السيرفر الثاني (B) - نسخة بنفس الصوالح
+  "1476180028608876621": { // <--- حط الـ ID تاع السيرفر الزاوج هنا
+    levelUpChannel: "1502031419398951083", // <--- حط ID قناة التهنئة هنا
+    roleRewards: {
+      1: "1502033298631688392",
+      10: "1502033775180251176",
+      20: "1502033866582659294",
+      35: "1502034203359969491",
+      50: "1502034369647345664",
+      70: "1502034532965023937",
+      80: "1502034730080796802"
+    }
+  }
+};
+
+// ==========================================
+// 3. الربط مع قاعدة البيانات (MongoDB)
+// ==========================================
+const mongoURI = process.env.MONGO_URI;
+if (mongoURI) {
+  mongoose.connect(mongoURI)
+    .then(() => console.log('✅ تربطنا مع المونڨو يا خو!'))
+    .catch(err => console.error('❌ غلطة في المونڨو:', err));
 }
 
+const userSchema = new mongoose.Schema({
+  guildId: String,
+  userId: String,
+  xp: { type: Number, default: 0 },
+  level: { type: Number, default: 0 }
+});
+const User = mongoose.model('User', userSchema);
+
+function getXPNeeded(level) {
+  return 120 * level; 
+}
+
+// ==========================================
+// 4. إعدادات البوت والـ Slash Commands
+// ==========================================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -41,76 +89,30 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-// =====================
-// 2. MongoDB Connection
-// =====================
-const mongoURI = process.env.MONGO_URI || config.mongoURI;
-
-if (mongoURI) {
-  mongoose.connect(mongoURI)
-    .then(() => console.log('✅ تربطنا مع المونڨو يا خو!'))
-    .catch(err => console.error('❌ كاين غلطة في المونڨو:', err));
-}
-
-const userSchema = new mongoose.Schema({
-  guildId: String,
-  userId: String,
-  xp: { type: Number, default: 0 },
-  level: { type: Number, default: 0 }
-});
-
-const User = mongoose.model('User', userSchema);
-
-function getXPNeeded(level) {
-  return 120 * level; 
-}
-
-// =====================
-// 3. الرولات وقناة التنبيهات
-// =====================
-const roleRewards = {
-  1: "1486624511427346472",
-  10: "1486624590481588434",
-  20: "1486624679811612792",
-  30: "1486624772833153026",
-  50: "1486625010645991505",
-  70: "1486625237570424936"
-};
-
-const LEVEL_UP_CHANNEL_ID = '1408661076350079056';
-
-// =====================
-// 4. Slash Commands
-// =====================
 const commands = [
   new SlashCommandBuilder().setName("ping").setDescription("Check bot response time"),
   new SlashCommandBuilder().setName("xp_leaderboard").setDescription("Show the XP leaderboard")
 ].map(command => command.toJSON());
 
-const botToken = process.env.BOT_TOKEN || config.token;
-const clientId = process.env.CLIENT_ID || config.clientId;
-const guildId = process.env.GUILD_ID || config.guildId;
+const botToken = process.env.BOT_TOKEN;
+const clientId = process.env.CLIENT_ID;
 
 const rest = new REST({ version: "10" }).setToken(botToken);
 
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
   try {
-    if (clientId && guildId) {
-      await rest.put(
-        Routes.applicationGuildCommands(clientId, guildId),
-        { body: commands }
-      );
-      console.log("✅ Slash commands registered.");
-    }
+    // تسجيل الأوامر Global باش يمشو في قاع السيرفرات (A و B)
+    await rest.put(Routes.applicationCommands(clientId), { body: commands });
+    console.log("✅ Global Slash commands registered.");
   } catch (error) {
-    console.log("⚠️ تأخر في تسجيل الأوامر، لكن البوت شغال.");
+    console.error("⚠️ Error registering commands:", error);
   }
 });
 
-// =====================
-// 5. Command Handling
-// =====================
+// ==========================================
+// 5. Handling Interaction (Ping & Leaderboard)
+// ==========================================
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
@@ -121,7 +123,6 @@ client.on(Events.InteractionCreate, async interaction => {
   if (interaction.commandName === "xp_leaderboard") {
     try {
       await interaction.deferReply(); 
-
       const topUsers = await User.find({ guildId: interaction.guildId })
         .sort({ level: -1, xp: -1 })
         .limit(10);
@@ -131,9 +132,7 @@ client.on(Events.InteractionCreate, async interaction => {
       let description = "";
       for (let i = 0; i < topUsers.length; i++) {
         const data = topUsers[i];
-        try {
-          await interaction.guild.members.fetch(data.userId);
-        } catch (e) {}
+        try { await interaction.guild.members.fetch(data.userId); } catch (e) {}
         description += `**${i + 1}.** <@${data.userId}> — المستوى **${data.level}** | **${data.xp} XP**\n`;
       }
 
@@ -145,18 +144,14 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.editReply({ embeds: [embed] });
     } catch (err) {
       console.error(err);
-      if (interaction.deferred) {
-        interaction.editReply("حدث خطأ أثناء جلب البيانات.");
-      } else {
-        interaction.reply("حدث خطأ أثناء جلب البيانات.");
-      }
+      interaction.deferred ? interaction.editReply("Error!") : interaction.reply("Error!");
     }
   }
 });
 
-// =====================
-// 6. XP System Logic
-// =====================
+// ==========================================
+// 6. XP System Logic (Multi-Guild)
+// ==========================================
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot || !message.guild) return;
 
@@ -176,28 +171,40 @@ client.on(Events.MessageCreate, async message => {
     await userData.save();
 
     if (leveledUp) {
-      const channel = message.guild.channels.cache.get(LEVEL_UP_CHANNEL_ID) || message.channel;
-      let response = `تهانينا 🥳 <@${message.author.id}>\nتمت ترقيتك للمستوى **${userData.level}**`;
+      // جلب إعدادات السيرفر لي جا منو الميساج
+      const currentConfig = guildConfigs[message.guild.id];
+      
+      if (currentConfig) {
+        const channel = message.guild.channels.cache.get(currentConfig.levelUpChannel) || message.channel;
+        let response = `تهانينا 🥳 <@${message.author.id}>\nتمت ترقيتك للمستوى **${userData.level}**`;
 
-      if (roleRewards[userData.level]) {
-        const newRole = message.guild.roles.cache.get(roleRewards[userData.level]);
-        if (newRole) {
-          await message.member.roles.add(newRole).catch(() => null);
-          response += `\nلقد ربحت رول: **${newRole.name}**`;
+        // مكافأة الرولات
+        if (currentConfig.roleRewards[userData.level]) {
+          const roleId = currentConfig.roleRewards[userData.level];
+          const newRole = message.guild.roles.cache.get(roleId);
+          if (newRole) {
+            await message.member.roles.add(newRole).catch(() => null);
+            response += `\nلقد ربحت رول: **${newRole.name}**`;
+          }
         }
+        channel.send(response);
+      } else {
+        // إذا السيرفر مش مسجل في القائمة، يبعث في نفس الشانل بلا رولات
+        message.channel.send(`تهانينا 🥳 <@${message.author.id}> وصلت للمستوى **${userData.level}**`);
       }
-      channel.send(response);
     }
   } catch (err) {
     console.error("XP Error:", err);
   }
 });
 
-
+// ==========================================
+// 7. ميزة الصبر (الدخول)
+// ==========================================
 function startBot() {
   if (!botToken) return console.error("❌ BOT_TOKEN is missing!");
   client.login(botToken).catch(err => {
-    console.error("❌ فشل الاتصال (Timeout). سأعيد المحاولة بعد 10 ثواني...");
+    console.error("❌ Timeout. Retrying in 10s...");
     setTimeout(startBot, 10000);
   });
 }
