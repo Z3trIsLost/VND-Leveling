@@ -171,8 +171,8 @@ client.on(Events.MessageCreate, async message => {
         const channel = message.guild.channels.cache.get(currentConfig.levelUpChannel) || message.channel;
         let response = `تهانينا 🥳 <@${message.author.id}>\nتمت ترقيتك للمستوى **${userData.level}**`;
 
-        // مكافأة الرولات
-        if (currentConfig.roleRewards[userData.level]) {
+        // مكافأة الرولات (يتحقق أولاً إذا السيرفر فيه roleRewards)
+        if (currentConfig.roleRewards && currentConfig.roleRewards[userData.level]) {
           const roleId = currentConfig.roleRewards[userData.level];
           const newRole = message.guild.roles.cache.get(roleId);
           if (newRole) {
