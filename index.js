@@ -11,6 +11,7 @@ const {
 
 const mongoose = require('mongoose');
 const http = require('http');
+const setStatus = require('./status'); // <--- زدنا استدعاء ملف الحالة المخصصة هنا
 
 // ==========================================
 // 1. Web Server (باش يبقى البوت شاعل في Render)
@@ -101,6 +102,7 @@ const rest = new REST({ version: "10" }).setToken(botToken);
 
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
+  setStatus(client); // <--- زدنا تشغيل الحالة المخصصة هنا
   try {
     // تسجيل الأوامر Global باش يمشو في قاع السيرفرات (A و B)
     await rest.put(Routes.applicationCommands(clientId), { body: commands });
